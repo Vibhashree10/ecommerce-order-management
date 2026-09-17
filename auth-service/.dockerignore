@@ -1,0 +1,23 @@
+# Build stage
+target/
+*.jar
+*.war
+*.ear
+*.tar.gz
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Maven
+.m2/
+*.pom
+
+# Environment
+.env
+.env.local
