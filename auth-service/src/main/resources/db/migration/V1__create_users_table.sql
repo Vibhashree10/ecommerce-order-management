@@ -2,7 +2,7 @@
 -- Create users table for authentication service
 
 CREATE TABLE IF NOT EXISTS users (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
     email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
@@ -10,8 +10,9 @@ CREATE TABLE IF NOT EXISTS users (
     last_name VARCHAR(100),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_username (username),
-    INDEX idx_email (email),
-    INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+CREATE INDEX idx_username ON users(username);
+CREATE INDEX idx_email ON users(email);
+CREATE INDEX idx_created_at ON users(created_at);
