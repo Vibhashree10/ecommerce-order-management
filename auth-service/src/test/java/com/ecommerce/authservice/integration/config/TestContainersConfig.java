@@ -1,5 +1,5 @@
 package com.ecommerce.authservice.integration.config;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.testcontainers.utility.DockerImageName;
@@ -8,8 +8,8 @@ import org.testcontainers.utility.DockerImageName;
 public class TestContainersConfig {
 
     @Bean
-    public PostgreSQLContainer postgresContainer() {
-        PostgreSQLContainer container = new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine")) // Removed <?> here
+    public PostgreSQLContainer<?> postgresContainer() {
+        PostgreSQLContainer<?> container = new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"))
                 .withDatabaseName("auth_db_test")
                 .withUsername("test_user")
                 .withPassword("test_password")
