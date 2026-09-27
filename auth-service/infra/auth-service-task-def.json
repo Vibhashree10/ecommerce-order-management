@@ -1,0 +1,38 @@
+{
+  "family": "auth-service",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::508193319665:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "auth-service",
+      "image": "508193319665.dkr.ecr.us-east-1.amazonaws.com/auth-service:v9.0.0",
+      "portMappings": [{ "containerPort": 8081, "protocol": "tcp" }],
+      "environment": [
+        { "name": "SPRING_PROFILES_ACTIVE", "value": "dev" },
+        { "name": "SPRING_DATASOURCE_URL", "value": "jdbc:postgresql://ecommerce-auth-db.cufqg4oaagsj.us-east-1.rds.amazonaws.com:5432/auth_database" },
+        { "name": "SPRING_DATASOURCE_USERNAME", "value": "authadmin" },
+        { "name": "SPRING_DATASOURCE_PASSWORD", "value": "Authadmin_123" },
+        { "name": "JWT_SECRET", "value": "w7RIgnQCysuFZwTcmhsOEz4Drq3JsOgnvuDrrdiL45L7uUpr5Y90EyRWsNid3GnV0cbBQBOG//hwyY2FXdeoGw==" },
+        { "name": "DEBUG", "value": "true" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/auth-service",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -q --spider http://localhost:8081/api/actuator/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 180
+      }
+    }
+  ]
+}
