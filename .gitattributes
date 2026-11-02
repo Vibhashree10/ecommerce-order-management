@@ -1,0 +1,9 @@
+# Shell scripts MUST keep Unix line endings. If Git on Windows converts them to CRLF, bash fails with
+# errors like "$'\r': command not found" or "bad interpreter".
+*.sh        text eol=lf
+mvnw        text eol=lf
+*.properties text eol=lf
+*.sql       text eol=lf
+Dockerfile  text eol=lf
+*.cmd       text eol=crlf
+*.bat       text eol=crlf

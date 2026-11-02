@@ -1,0 +1,29 @@
+# ---- Build output -------------------------------------------------------------
+target/
+*.class
+*.jar
+!**/.mvn/wrapper/*.jar
+
+# ---- IDE ----------------------------------------------------------------------
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# ---- SECRETS and generated deploy state (NEVER commit these) --------------------
+# The deploy scripts write API keys, JWT secrets and a temporary task-def.json here.
+.deploy-*/
+.kafka-ec2/
+*.pem
+*.key
+.env
+deploy.env
+task-def.json
+
+# ---- Logs / OS ------------------------------------------------------------------
+*.log
+.DS_Store
+Thumbs.db
+HELP.md
