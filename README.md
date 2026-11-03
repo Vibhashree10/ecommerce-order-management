@@ -13,10 +13,11 @@ API Gateway, Multi-AZ, X-Ray and CI/CD.
 | [auth-service](auth-service/README.md) | 8081 | `auth_database` | deployed to AWS | registration, login, JWT |
 | [product-service](product-service/README.md) | 8082 | `product_database` | deployed to AWS | categories and products, events |
 | [inventory-service](inventory-service/README.md) | 8083 | `inventory_database` | deployed to AWS | stock, reservations, ledger |
-| order-service | - | - | planned | orchestrates reserve/confirm/release against inventory |
+| [order-service](order-service/README.md) | 8084 | `order_database` | deployed to AWS | orders, Saga against inventory, idempotency, recovery job |
 | payment-service | - | - | planned | |
-| notification-service | - | - | planned | |
-| api-gateway | - | - | planned | |
+| [notification-service](notification-service/README.md) | 8085 | `notification_database` | ready to deploy | order events (Kafka, optional) to LOG / e-mail notifications, retry |
+| [api-gateway](api-gateway/README.md) | 8080 | none | ready to deploy (deploy auth first) | single entry point: JWT check, routing, internal keys |
+| [common-lib](common-lib/README.md) | - | - | library, not deployed, not yet used by services | shared event/header/error contracts |
 
 Every service uses context path **`/api`**, so health is `GET /api/actuator/health` and all endpoints start with `/api`.
 Each service has its **own database** on a shared PostgreSQL server (database per service).
@@ -26,8 +27,9 @@ Each service has its **own database** on a shared PostgreSQL server (database pe
    client / Postman ---> |  ALB (per svc)  | ---> ECS Fargate task (Spring Boot) ---> RDS PostgreSQL (one DB per service)
                          +-----------------+                   |
                                                                +--> CloudWatch Logs  /ecs/SERVICE
-   order-service (planned) --reserve/confirm/release--> inventory-service --(optional)--> product-service
-   product-service / inventory-service --events--> Kafka on EC2 (optional, default: logging)
+   order-service --reserve/confirm/release--> inventory-service --(optional)--> product-service
+   order-service --(optional)--> product-service  (price, sku, name snapshot)
+   product-service / inventory-service / order-service --events--> Kafka on EC2 (optional, default: logging)
 ```
 
 ## Repository layout
@@ -38,18 +40,29 @@ Each service has its **own database** on a shared PostgreSQL server (database pe
 ├── deploy-auth-service.sh          one-command deploy of auth-service
 ├── deploy-product-service.sh       one-command deploy of product-service
 ├── deploy-inventory-service.sh     one-command deploy of inventory-service
+├── deploy-order-service.sh         one-command deploy of order-service (deploy inventory-service first)
+├── deploy-notification-service.sh  one-command deploy of notification-service (LOG channel; Kafka and e-mail optional)
+├── deploy-api-gateway.sh           one-command deploy of api-gateway (no database; needs engine v4.3)
 ├── kafka-ec2.sh                    optional single-node Kafka on EC2
 ├── deploy.env.example              the variables the scripts read (copy, never commit real values)
 ├── .gitignore  .gitattributes      secrets/build output ignored; *.sh forced to LF line endings
 ├── auth-service/                   pom.xml, Dockerfile, mvnw, .mvn/, src/
 ├── product-service/
 ├── inventory-service/              + postman/ collection
+├── order-service/                  + postman/ collection
+├── notification-service/           + postman/ collection
+├── api-gateway/                    + postman/ collection
+├── common-lib/                     plain jar with shared contracts (see its README)
 └── docs/
     ├── DEPLOYMENT.md               how to deploy, redeploy, roll back, options
     ├── TROUBLESHOOTING.md          every problem we hit, with cause and fix
     ├── KAFKA-INTEGRATION-GUIDE.md  optional Kafka on EC2
     ├── INVENTORY-SERVICE-DEPLOYMENT-GUIDE.md
-    └── INVENTORY-DESIGN-NOTES.md   DB choice, inter-service calls, design patterns
+    ├── INVENTORY-DESIGN-NOTES.md   DB choice, inter-service calls, design patterns
+    ├── ORDER-SERVICE-DEPLOYMENT-GUIDE.md
+    ├── ORDER-DESIGN-NOTES.md       Saga, idempotency, failure modes
+    ├── NOTIFICATION-SERVICE-DEPLOYMENT-GUIDE.md / NOTIFICATION-DESIGN-NOTES.md
+    └── API-GATEWAY-DEPLOYMENT-GUIDE.md / API-GATEWAY-DESIGN-NOTES.md
 ```
 
 All scripts sit in the repo root; each service folder holds `pom.xml` and `Dockerfile` directly.
@@ -57,7 +70,7 @@ All scripts sit in the repo root; each service folder holds `pom.xml` and `Docke
 ## Quick start (local)
 
 1. Install **JDK 21** (check `java -version`), **Git**, and PostgreSQL with pgAdmin (Docker is optional).
-2. Create three empty databases: `auth_database`, `product_database`, `inventory_database`.
+2. Create four empty databases: `auth_database`, `product_database`, `inventory_database`, `order_database`.
 3. In each service, put your Postgres login in `src/main/resources/application-local.properties`.
 4. Build and run a service (Git Bash; use `mvnw.cmd` in cmd, `.\mvnw.cmd` in PowerShell):
    ```bash
@@ -78,6 +91,11 @@ export CLUSTER_NAME=ecommerce-inventory-service-cluster ALLOW_NEW_CLUSTER=1   # 
 export RDS_ENDPOINT=YOUR-RDS-HOST DB_USERNAME=YOUR_RDS_MASTER_USER DB_PASSWORD=YOUR_RDS_MASTER_PASSWORD
 export CREATE_DB=1
 bash deploy-inventory-service.sh        # or deploy-auth-service.sh / deploy-product-service.sh
+# order-service needs inventory-service deployed first (it reads inventory's API key and load balancer):
+# bash deploy-order-service.sh
+# notification-service (optional Kafka/e-mail) and api-gateway (deploy LAST; no database, reads other services' keys):
+# bash deploy-notification-service.sh
+# bash deploy-api-gateway.sh
 ```
 The script prints the load balancer URL and a health check result. Full guide: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 Problems: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
@@ -97,10 +115,11 @@ Problems: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 - Phase 1 keeps DB password, JWT secret and API key as ECS **environment variables**. Move them to Secrets Manager (Phase 2).
 - The ALB is HTTP only; add an ACM certificate (HTTPS) before real traffic. RDS is publicly reachable in the dev setup; restrict it
   to the VPC for production.
-- inventory-service is an **internal** API protected with the `X-Internal-Api-Key` header; order-service will call it with that key.
+- inventory-service and order-service are **internal** APIs protected with the `X-Internal-Api-Key` header; order-service calls inventory-service with inventory's key
+  (`deploy-order-service.sh` reads it from `.deploy-inventory-service/internal-api-key.txt` and checks it before building).
 - Rotate any password that has been pasted into a chat, ticket or terminal history.
 
 ## Roadmap
 
-order-service (Saga: reserve, pay, confirm/release), payment-service, notification-service, api-gateway, shared `common-lib`;
+payment-service (new Saga step between reserved and confirmed), adopting `common-lib` through a package repository, per-user authorization in order-service, restricting services to the gateway;
 Phase 2: SNS/SQS, Secrets Manager, API Gateway, Multi-AZ, X-Ray, CI/CD (GitHub Actions to ECR/ECS).

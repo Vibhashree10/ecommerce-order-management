@@ -1,0 +1,128 @@
+{
+  "info": {
+    "name": "api-gateway",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "gateway",
+      "value": "http://YOUR_GATEWAY_ALB/api"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "email",
+      "value": "gw-test@example.com"
+    },
+    {
+      "key": "password",
+      "value": "Passw0rd!"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health (public)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{gateway}}/actuator/health"
+      }
+    },
+    {
+      "name": "Register (public) - adjust fields to auth-service",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{gateway}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Test\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Login (public) - saves token",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{gateway}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const j = pm.response.json();",
+              "const t = j.token || j.accessToken || j.jwt;",
+              "if (t) pm.collectionVariables.set('token', t);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders without token (401)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{gateway}}/orders"
+      }
+    },
+    {
+      "name": "Products (via gateway)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{gateway}}/products"
+      }
+    },
+    {
+      "name": "Order by number (404 = routing works)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{gateway}}/orders/ORD-UNKNOWN"
+      }
+    },
+    {
+      "name": "Notifications (if enabled)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{gateway}}/notifications"
+      }
+    }
+  ]
+}

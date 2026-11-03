@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# deploy-service.sh (v4) - Deploy a Spring Boot microservice to AWS ECS Fargate
+# deploy-service.sh (v4.3) - Deploy a Spring Boot microservice to AWS ECS Fargate
 #   ECR + ECS Fargate + ALB + CloudWatch, RDS PostgreSQL, optional Kafka (EC2/MSK)
 #
 # Idempotent and safe to re-run. Every run:
@@ -23,6 +23,10 @@
 #   * EXTRA_ENV="NAME=VALUE,NAME2=VALUE2" injects extra environment variables into the task
 #     (inter-service URLs, API keys, feature flags). Values must not contain commas, quotes or backslashes.
 #   * Fully backward compatible with v3: it can replace your existing deploy-service.sh for every service.
+#
+# v4.3 changes:
+#   * NO_DB=1 deploys a service that has no database (api-gateway): skips the RDS lookup, database creation,
+#     the task->RDS security group rule and the SPRING_DATASOURCE_* variables. Default NO_DB=0 = unchanged behaviour.
 #
 # Run in Git Bash or WSL.  See KAFKA-INTEGRATION-GUIDE.md.
 # =============================================================================
@@ -53,6 +57,7 @@ export MSYS_NO_PATHCONV=1   # stop Git Bash from rewriting /paths and file:// ar
 : "${DB_PASSWORD:=}"
 : "${JWT_SECRET:=}"
 : "${CREATE_DB:=0}"                           # 1 = create the database if it does not exist
+: "${NO_DB:=0}"                               # 1 = service has NO database (api-gateway)
 : "${RDS_ALLOW_MY_IP:=1}"                     # with CREATE_DB=1: open RDS 5432 to your public IP /32
 : "${RDS_SG_ID:=}"                            # optional: auto-detected from RDS_ENDPOINT if blank
 : "${PSQL_IMAGE:=postgres:16-alpine}"         # used when psql is not installed locally
@@ -178,8 +183,10 @@ log "0/11 Pre-flight checks"
 [[ "$SERVICE_NAME" == "YOUR_SERVICE_NAME" ]] && die "Set SERVICE_NAME first."
 [[ ${#SERVICE_NAME} -gt 25 ]] && die "SERVICE_NAME must be <= 25 chars (ALB/target-group names max 32 incl. suffix)"
 [[ "$SERVICE_NAME" =~ ^[a-z0-9-]+$ ]] || die "SERVICE_NAME may contain only lowercase letters, digits and hyphens"
-[[ -z "$RDS_ENDPOINT" || -z "$DB_NAME" || -z "$DB_USERNAME" || -z "$DB_PASSWORD" ]] \
-  && die "Set RDS_ENDPOINT, DB_NAME, DB_USERNAME and DB_PASSWORD."
+if [[ "$NO_DB" != "1" ]]; then
+  [[ -z "$RDS_ENDPOINT" || -z "$DB_NAME" || -z "$DB_USERNAME" || -z "$DB_PASSWORD" ]] \
+    && die "Set RDS_ENDPOINT, DB_NAME, DB_USERNAME and DB_PASSWORD (or NO_DB=1 for a service without a database)."
+fi
 command -v aws    >/dev/null || die "aws CLI not found"
 command -v docker >/dev/null || die "docker not found"
 docker info >/dev/null 2>&1  || die "Docker daemon not running (start Docker Desktop, wait for 'Engine running')"
@@ -233,27 +240,36 @@ esac
 ACCOUNT_ID=$(aws_ sts get-caller-identity --query Account --output text) || die "AWS credentials not working"
 REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 IMAGE_URI="${REGISTRY}/${SERVICE_NAME}:${IMAGE_TAG}"
-DB_URL="jdbc:postgresql://${RDS_ENDPOINT}:5432/${DB_NAME}"
+DB_URL=""
+DB_SUMMARY="none (NO_DB=1)"
+if [[ "$NO_DB" != "1" ]]; then
+  DB_URL="jdbc:postgresql://${RDS_ENDPOINT}:5432/${DB_NAME}"
+  DB_SUMMARY="${DB_NAME} @ ${RDS_ENDPOINT}"
+fi
 log "Account=$ACCOUNT_ID Region=$AWS_REGION Cluster=$CLUSTER_NAME Service=$SERVICE_NAME Tag=$IMAGE_TAG Events=$EVENT_PUBLISHER"
 
 # ---------------------- 1. RDS DISCOVERY + DATABASE ---------------------------
 log "1/11 RDS instance lookup and database"
 RDS_PUBLIC=""
-RDS_INFO=$(aws_ rds describe-db-instances \
-  --query "DBInstances[?Endpoint.Address=='${RDS_ENDPOINT}'].[VpcSecurityGroups[0].VpcSecurityGroupId,PubliclyAccessible,DBInstanceIdentifier]" \
-  --output text 2>/dev/null || true)
-if [[ -n "$RDS_INFO" ]]; then
-  read -r FOUND_RDS_SG RDS_PUBLIC FOUND_RDS_ID <<< "$RDS_INFO"
-  [[ -z "$RDS_SG_ID" ]] && RDS_SG_ID="$FOUND_RDS_SG"
-  log "RDS instance=$FOUND_RDS_ID  securityGroup=$RDS_SG_ID  publiclyAccessible=$RDS_PUBLIC"
+if [[ "$NO_DB" == "1" ]]; then
+  log "NO_DB=1: this service has no database; skipping RDS lookup and database creation"
 else
-  log "WARNING: no RDS instance matches endpoint '$RDS_ENDPOINT' in $AWS_REGION. Task->RDS rule will be skipped unless RDS_SG_ID is set."
-fi
+  RDS_INFO=$(aws_ rds describe-db-instances \
+    --query "DBInstances[?Endpoint.Address=='${RDS_ENDPOINT}'].[VpcSecurityGroups[0].VpcSecurityGroupId,PubliclyAccessible,DBInstanceIdentifier]" \
+    --output text 2>/dev/null || true)
+  if [[ -n "$RDS_INFO" ]]; then
+    read -r FOUND_RDS_SG RDS_PUBLIC FOUND_RDS_ID <<< "$RDS_INFO"
+    [[ -z "$RDS_SG_ID" ]] && RDS_SG_ID="$FOUND_RDS_SG"
+    log "RDS instance=$FOUND_RDS_ID  securityGroup=$RDS_SG_ID  publiclyAccessible=$RDS_PUBLIC"
+  else
+    log "WARNING: no RDS instance matches endpoint '$RDS_ENDPOINT' in $AWS_REGION. Task->RDS rule will be skipped unless RDS_SG_ID is set."
+  fi
 
-if [[ "$CREATE_DB" == "1" ]]; then
-  ensure_database
-else
-  log "Skipping DB creation (CREATE_DB=0). Make sure '$DB_NAME' exists on the RDS instance!"
+  if [[ "$CREATE_DB" == "1" ]]; then
+    ensure_database
+  else
+    log "Skipping DB creation (CREATE_DB=0). Make sure '$DB_NAME' exists on the RDS instance!"
+  fi
 fi
 
 # ------------------------------ 2. CLUSTER ------------------------------------
@@ -298,7 +314,9 @@ ALB_SG=$(ensure_sg "${SERVICE_NAME}-alb-sg" "ALB for ${SERVICE_NAME}")
 TASK_SG=$(ensure_sg "${SERVICE_NAME}-task-sg" "ECS tasks for ${SERVICE_NAME}")
 add_ingress "$ALB_SG"  80 0.0.0.0/0
 add_ingress "$TASK_SG" "$CONTAINER_PORT" "$ALB_SG"          # ALB -> task (fixes Target.Timeout)
-if [[ -n "$RDS_SG_ID" ]]; then
+if [[ "$NO_DB" == "1" ]]; then
+  :                                                         # no database: nothing to open
+elif [[ -n "$RDS_SG_ID" ]]; then
   add_ingress "$RDS_SG_ID" 5432 "$TASK_SG"                  # task -> RDS
 else
   log "WARNING: RDS security group unknown; make sure it allows the task SG ($TASK_SG) on 5432"
@@ -369,6 +387,10 @@ for _v in SERVICE_NAME TASK_CPU TASK_MEMORY EXEC_ROLE_ARN IMAGE_URI CONTAINER_PO
           AWS_REGION HEALTH_PATH; do
   [[ -n "${!_v:-}" ]] && printf -v "$_v" '%s' "$(printf '%s' "${!_v}" | tr -d '\r\000-\010\013\014\016-\037' )"
 done
+DB_ENV_JSON=""
+if [[ "$NO_DB" != "1" ]]; then
+  DB_ENV_JSON=$'{ "name": "SPRING_DATASOURCE_URL",          "value": "'"${DB_URL}"$'" },\n        { "name": "SPRING_DATASOURCE_USERNAME",     "value": "'"${DB_USERNAME}"$'" },\n        { "name": "SPRING_DATASOURCE_PASSWORD",     "value": "'"${DB_PASSWORD}"$'" },'
+fi
 cat > "$WORK_DIR/task-def.json" <<EOF
 {
   "family": "${SERVICE_NAME}",
@@ -385,9 +407,7 @@ cat > "$WORK_DIR/task-def.json" <<EOF
       "portMappings": [{ "containerPort": ${CONTAINER_PORT}, "protocol": "tcp" }],
       "environment": [
         { "name": "SPRING_PROFILES_ACTIVE",         "value": "${SPRING_PROFILE}" },
-        { "name": "SPRING_DATASOURCE_URL",          "value": "${DB_URL}" },
-        { "name": "SPRING_DATASOURCE_USERNAME",     "value": "${DB_USERNAME}" },
-        { "name": "SPRING_DATASOURCE_PASSWORD",     "value": "${DB_PASSWORD}" },
+        ${DB_ENV_JSON}
         { "name": "JWT_SECRET",                     "value": "${JWT_SECRET}" },
         { "name": "APP_EVENTS_PUBLISHER",           "value": "${EVENT_PUBLISHER}" },
         { "name": "SPRING_KAFKA_BOOTSTRAP_SERVERS", "value": "${KAFKA_BOOTSTRAP:-localhost:9092}" }${EXTRA_ENV_JSON}
@@ -459,7 +479,7 @@ cat <<EOF
  DEPLOYED : ${SERVICE_NAME}   (cluster: ${CLUSTER_NAME})
  Base URL : http://${ALB_DNS}${CONTEXT_PATH}/
  Health   : ${URL}  -> HTTP 200
- Database : ${DB_NAME} @ ${RDS_ENDPOINT}
+ Database : ${DB_SUMMARY}
  Events   : ${EVENT_PUBLISHER}${KAFKA_BOOTSTRAP:+  (broker ${KAFKA_BOOTSTRAP})}
  Image    : ${IMAGE_URI}
  TaskDef  : ${TASK_DEF_ARN}

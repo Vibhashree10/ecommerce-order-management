@@ -1,0 +1,174 @@
+{
+  "info": {
+    "name": "notification-service",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://YOUR_ALB_DNS/api"
+    },
+    {
+      "key": "apiKey",
+      "value": "PASTE_FROM_.deploy-notification-service/internal-api-key.txt"
+    },
+    {
+      "key": "orderNumber",
+      "value": "ORD-TEST-1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health (public)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/actuator/health"
+      }
+    },
+    {
+      "name": "Event: ORDER_CREATED",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"ORDER_CREATED\",\n  \"orderNumber\": \"{{orderNumber}}\",\n  \"customerId\": \"c1\",\n  \"totalAmount\": 25.0,\n  \"currency\": \"USD\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Event: ORDER_CONFIRMED",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"ORDER_CONFIRMED\",\n  \"orderNumber\": \"{{orderNumber}}\",\n  \"customerId\": \"c1\",\n  \"totalAmount\": 25.0,\n  \"currency\": \"USD\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Event: ORDER_CANCELLED",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"ORDER_CANCELLED\",\n  \"orderNumber\": \"{{orderNumber}}\",\n  \"customerId\": \"c1\",\n  \"reason\": \"customer request\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Event: invalid (400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"ORDER_CREATED\"\n}"
+        }
+      }
+    },
+    {
+      "name": "List by order",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications?orderNumber={{orderNumber}}"
+      }
+    },
+    {
+      "name": "List FAILED",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications?status=FAILED"
+      }
+    },
+    {
+      "name": "Get by id",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications/1"
+      }
+    },
+    {
+      "name": "Retry (only FAILED)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/notifications/1/retry"
+      }
+    },
+    {
+      "name": "No key (401)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/notifications"
+      }
+    }
+  ]
+}

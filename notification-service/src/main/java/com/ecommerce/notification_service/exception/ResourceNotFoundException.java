@@ -1,0 +1,8 @@
+package com.ecommerce.notification_service.exception;
+
+/** Notification not found. Mapped to HTTP 404. */
+public class ResourceNotFoundException extends RuntimeException {
+    public ResourceNotFoundException(String message) {
+        super(message);
+    }
+}
