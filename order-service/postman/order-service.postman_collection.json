@@ -1,0 +1,535 @@
+{
+  "info": {
+    "name": "order-service",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Local: baseUrl http://localhost:8084/api, inventoryUrl http://localhost:8083/api. On AWS: use the load balancer URLs and set apiKey (order-service) and inventoryApiKey (inventory-service)."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8084/api"
+    },
+    {
+      "key": "apiKey",
+      "value": ""
+    },
+    {
+      "key": "inventoryUrl",
+      "value": "http://localhost:8083/api"
+    },
+    {
+      "key": "inventoryApiKey",
+      "value": ""
+    },
+    {
+      "key": "orderNumber",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health (no key needed)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/actuator/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "actuator",
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "0 Setup in inventory-service",
+      "item": [
+        {
+          "name": "0a Create stock for product 1 (inventory)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Internal-Api-Key",
+                "value": "{{inventoryApiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{inventoryUrl}}/inventory/items",
+              "host": [
+                "{{inventoryUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": 1,\n  \"quantity\": 50,\n  \"reorderLevel\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Run once. 409 means the product already has a stock record, which is fine."
+          }
+        },
+        {
+          "name": "0b Create stock for product 2 (inventory)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Internal-Api-Key",
+                "value": "{{inventoryApiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{inventoryUrl}}/inventory/items",
+              "host": [
+                "{{inventoryUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "items"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": 2,\n  \"quantity\": 3,\n  \"reorderLevel\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Only 3 in stock: use it to test the out-of-stock (REJECTED) path."
+          }
+        },
+        {
+          "name": "0c Check availability product 1 (inventory)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Internal-Api-Key",
+                "value": "{{inventoryApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{inventoryUrl}}/inventory/items/1/availability",
+              "host": [
+                "{{inventoryUrl}}"
+              ],
+              "path": [
+                "inventory",
+                "items",
+                "1",
+                "availability"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1 Create order (stock reserved)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{$guid}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerId\": \"cust-1001\",\n  \"currency\": \"USD\",\n  \"items\": [\n    {\n      \"productId\": 1,\n      \"quantity\": 2,\n      \"unitPrice\": 19.99\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Expect 201 and status STOCK_RESERVED. unitPrice is only used when product lookup is disabled; with lookup enabled the catalog price wins. Saves {{orderNumber}}."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const j = pm.response.json();",
+              "if (j.orderNumber) { pm.collectionVariables.set('orderNumber', j.orderNumber); }",
+              "pm.test('status is ' + j.status, function () { pm.expect(['PENDING','STOCK_RESERVED','REJECTED','CONFIRMED','CANCELLED']).to.include(j.status); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1b Create order (idempotent replay)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "fixed-key-123"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerId\": \"cust-1001\",\n  \"items\": [\n    {\n      \"productId\": 1,\n      \"quantity\": 1,\n      \"unitPrice\": 19.99\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Send this twice: both responses carry the SAME orderNumber and stock is reserved only once."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const j = pm.response.json();",
+              "if (j.orderNumber) { pm.collectionVariables.set('orderNumber', j.orderNumber); }",
+              "pm.test('status is ' + j.status, function () { pm.expect(['PENDING','STOCK_RESERVED','REJECTED','CONFIRMED','CANCELLED']).to.include(j.status); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1c Create order (not enough stock -> REJECTED)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerId\": \"cust-1001\",\n  \"items\": [\n    {\n      \"productId\": 2,\n      \"quantity\": 10,\n      \"unitPrice\": 5.0\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Product 2 has 3 in stock. Expect 201 with status REJECTED and failureReason from inventory-service."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const j = pm.response.json();",
+              "if (j.orderNumber) { pm.collectionVariables.set('orderNumber', j.orderNumber); }",
+              "pm.test('status is ' + j.status, function () { pm.expect(['PENDING','STOCK_RESERVED','REJECTED','CONFIRMED','CANCELLED']).to.include(j.status); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "1d Create order (validation error)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerId\": \"\",\n  \"items\": [\n    {\n      \"productId\": 1,\n      \"quantity\": 0\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Expect 400 listing every invalid field."
+      }
+    },
+    {
+      "name": "2 Get order",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders/{{orderNumber}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders",
+            "{{orderNumber}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "3 List orders",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders?customerId=cust-1001&page=0&size=10",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders"
+          ],
+          "query": [
+            {
+              "key": "customerId",
+              "value": "cust-1001"
+            },
+            {
+              "key": "page",
+              "value": "0"
+            },
+            {
+              "key": "size",
+              "value": "10"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "3b List orders by status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders?status=STOCK_RESERVED&page=0&size=10",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders"
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "STOCK_RESERVED"
+            },
+            {
+              "key": "page",
+              "value": "0"
+            },
+            {
+              "key": "size",
+              "value": "10"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4 Confirm order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders/{{orderNumber}}/confirm",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders",
+            "{{orderNumber}}",
+            "confirm"
+          ]
+        },
+        "description": "STOCK_RESERVED -> CONFIRMED. Call it twice: the second call is a harmless replay."
+      }
+    },
+    {
+      "name": "5 Cancel order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders/{{orderNumber}}/cancel",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders",
+            "{{orderNumber}}",
+            "cancel"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"changed my mind\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "description": "Create a new order first (request 1). Cancelling a CONFIRMED order returns 409."
+      }
+    },
+    {
+      "name": "6 Order history (audit trail)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders/{{orderNumber}}/history",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "orders",
+            "{{orderNumber}}",
+            "history"
+          ]
+        }
+      }
+    },
+    {
+      "name": "7 Check the reservation in inventory-service",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Internal-Api-Key",
+            "value": "{{inventoryApiKey}}"
+          }
+        ],
+        "url": {
+          "raw": "{{inventoryUrl}}/inventory/reservations/{{orderNumber}}",
+          "host": [
+            "{{inventoryUrl}}"
+          ],
+          "path": [
+            "inventory",
+            "reservations",
+            "{{orderNumber}}"
+          ]
+        }
+      }
+    }
+  ]
+}
